@@ -1,3 +1,6 @@
+以下が、**checkpoint からの再開方法を含めて更新した README 全文**です。
+
+````markdown
 # kanakanji-gpt2
 
 `ku-nlp/gpt2-small-japanese-char` をベースにした、最小のかな漢字変換 fine-tuning パイプラインです。
@@ -10,19 +13,39 @@
 ふるーとをふく	フルートを吹く
 きしゃできしゃした	汽車で帰社した
 ```
+````
+
+文脈ありの場合は次の形式です。
+
+```tsv
+前の文脈	ふるーとをふく	フルートを吹く
+前の文脈	きしゃできしゃした	汽車で帰社した
+```
 
 学習時にはこれを次の 1 系列へ変換します。
+
+### 文脈なし
 
 ```text
 \uee00ふるーとをふく\uee01フルートを吹く
 \uee00きしゃできしゃした\uee01汽車で帰社した
 ```
 
+### 文脈あり
+
+```text
+\uee02前の文脈\uee00ふるーとをふく\uee01フルートを吹く
+\uee02前の文脈\uee00きしゃできしゃした\uee01汽車で帰社した
+```
+
 - `\uee00`: 入力開始
 - `\uee01`: 出力開始
-- `\uee02`: 文脈開始（今回の最小構成では未使用）
+- `\uee02`: 文脈開始
 
 損失は **出力開始以降だけ** にかかるようにしてあります。
+つまり、入力側や文脈側は teacher forcing のために系列へ含めますが、loss は `expected` 側だけにかかります。
+
+---
 
 ## セットアップ
 
@@ -31,6 +54,8 @@ uv venv
 source .venv/bin/activate
 uv pip install -e .
 ```
+
+---
 
 ## 学習データ例
 
@@ -58,12 +83,29 @@ uv pip install -e .
 
 `data/valid.tsv` も同じ形式です。
 
+文脈ありの場合は、各行を次の 3 列にします。
+
+```tsv
+left_context	yomi	expected
+```
+
+例:
+
+```tsv
+きのうはがっきてんにいった	ふるーとをふく	フルートを吹く
+しゃないでしんぶんをよんだ	きしゃできしゃした	汽車で帰社した
+```
+
+---
+
 ## JSONL へ変換したい場合
 
 ```bash
 python -m scripts.build_dataset --input data/train.tsv --output data/train.jsonl
 python -m scripts.build_dataset --input data/valid.tsv --output data/valid.jsonl
 ```
+
+---
 
 ## zenz-v2.5 dataset を使う
 
@@ -84,13 +126,101 @@ python -m scripts.build_dataset --hf_dataset Miwa-Keita/zenz-v2.5-dataset --hf_s
 
 `--max_records` を省略すると、フィルター通過後の **全件** を順次書き出します。
 
-### 学習
+---
+
+## LoRA 学習
+
+### 最小例
+
+```bash
+python -m scripts.train_lora --train_tsv data/train.tsv --valid_tsv data/valid.tsv --base_model ku-nlp/gpt2-small-japanese-char --output_dir out/gpt2-kanakanji-lora --num_train_epochs 10 --learning_rate 5e-4 --per_device_train_batch_size 8 --per_device_eval_batch_size 8 --gradient_accumulation_steps 1 --max_length 128
+```
+
+### zenz データで学習する例
 
 ```bash
 python -m scripts.train_lora --train_tsv data/zenz_train.tsv --valid_tsv data/zenz_valid.tsv --base_model ku-nlp/gpt2-small-japanese-char --output_dir out/zenz-lora --num_train_epochs 3 --learning_rate 1e-4 --per_device_train_batch_size 8 --per_device_eval_batch_size 8 --gradient_accumulation_steps 1 --max_length 128 --with_context
 ```
 
-## 将来の拡張
+```bash
+python -m scripts.eval_greedy --lora_dir out/zenz-lora --input ふるーとをふく
+```
+
+```bash
+python -m scripts.merge_lora --lora_dir out/zenz-lora --output_dir out/zenz-merged
+```
+
+### 主なオプション
+
+- `--train_tsv`: 学習データ TSV
+- `--valid_tsv`: 検証データ TSV
+- `--base_model`: ベースモデル
+- `--output_dir`: 出力先
+- `--max_length`: 最大トークン長
+- `--num_train_epochs`: エポック数
+- `--learning_rate`: 学習率
+- `--per_device_train_batch_size`: 学習バッチサイズ
+- `--per_device_eval_batch_size`: 検証バッチサイズ
+- `--gradient_accumulation_steps`: 勾配蓄積
+- `--with_context`: `left_context<TAB>yomi<TAB>expected` 形式を使う
+- `--resume_from_checkpoint`: checkpoint から学習再開する
+
+---
+
+## checkpoint 保存と再開
+
+学習中、`Trainer` により `output_dir` の中へ自動で checkpoint が保存されます。
+
+例:
+
+```text
+out/zenz-lora/
+├── checkpoint-200/
+├── checkpoint-400/
+└── ...
+```
+
+これらの checkpoint から途中再開できます。
+
+### 最新 checkpoint から再開
+
+```bash
+python -m scripts.train_lora --train_tsv data/zenz_train.tsv --valid_tsv data/zenz_valid.tsv --base_model ku-nlp/gpt2-small-japanese-char --output_dir out/zenz-lora --num_train_epochs 3 --learning_rate 1e-4 --per_device_train_batch_size 8 --per_device_eval_batch_size 8 --gradient_accumulation_steps 1 --max_length 128 --with_context --resume_from_checkpoint true
+```
+
+### 特定 checkpoint から再開
+
+```bash
+python -m scripts.train_lora --train_tsv data/zenz_train.tsv --valid_tsv data/zenz_valid.tsv --base_model ku-nlp/gpt2-small-japanese-char --output_dir out/zenz-lora --num_train_epochs 3 --learning_rate 1e-4 --per_device_train_batch_size 8 --per_device_eval_batch_size 8 --gradient_accumulation_steps 1 --max_length 128 --with_context --resume_from_checkpoint out/zenz-lora/checkpoint-200
+```
+
+### 注意
+
+- checkpoint 再開時は、基本的に **同じ設定** を使ってください。
+- `output_dir` を使い回して新規学習を始めると、既存 checkpoint に上書きしようとして warning が出ることがあります。
+- 新規学習と再開学習を混同しないようにするのがおすすめです。
+
+---
+
+## greedy 推論
+
+```bash
+python -m scripts.eval_greedy --lora_dir out/gpt2-kanakanji-lora --input ふるーとをふく
+```
+
+文脈あり推論に対応している場合は、実装に応じて `left_context` も指定してください。
+
+---
+
+## LoRA をマージ
+
+```bash
+python -m scripts.merge_lora --lora_dir out/gpt2-kanakanji-lora --output_dir out/gpt2-kanakanji-merged
+```
+
+---
+
+## build_dataset の拡張
 
 `build_dataset.py` は `--hooks` で前処理モジュールを差し替えられるようにしてあります。
 
@@ -107,28 +237,34 @@ def filter_record(record):
 def transform_record(record):
     return {
         "left_context": record.get("left_context") or "",
-        "yomi": record.get("input", "").replace("ヴ", "ブ"),
+        "yomi": record.get("input", ""),
         "expected": record.get("output", ""),
     }
 ```
 
-## LoRA 学習
+---
 
-```bash
-python -m scripts.train_lora --train_tsv data/train.tsv --valid_tsv data/valid.tsv --base_model ku-nlp/gpt2-small-japanese-char --output_dir out/gpt2-kanakanji-lora --num_train_epochs 10 --learning_rate 5e-4 --per_device_train_batch_size 8 --per_device_eval_batch_size 8 --gradient_accumulation_steps 1 --max_length 128
+## ディレクトリ例
+
+```text
+kanakanji-gpt2/
+├── data/
+│   ├── train.tsv
+│   ├── valid.tsv
+│   ├── zenz_train.tsv
+│   └── zenz_valid.tsv
+├── out/
+│   └── zenz-lora/
+├── scripts/
+│   ├── build_dataset.py
+│   ├── train_lora.py
+│   ├── eval_greedy.py
+│   └── merge_lora.py
+├── pyproject.toml
+└── README.md
 ```
 
-## greedy 推論
-
-```bash
-python -m scripts.eval_greedy --lora_dir out/gpt2-kanakanji-lora --input ふるーとをふく
-```
-
-## LoRA をマージ
-
-```bash
-python -m scripts.merge_lora --lora_dir out/gpt2-kanakanji-lora --output_dir out/gpt2-kanakanji-merged
-```
+---
 
 ## 補足
 
@@ -136,3 +272,5 @@ python -m scripts.merge_lora --lora_dir out/gpt2-kanakanji-lora --output_dir out
 - 推論も学習と同じ形式にしてください。
 - 最初は文脈なしで十分です。
 - まずは train の一部を再現できるところまで確認してください。
+- 長さや表記ゆれが大きいデータを最初から大量投入するより、まず小さく検証したほうが安定します。
+- fine-tuning すると、特定ドメインには強くなりますが、元の変換バランスが崩れることがあります。そのため valid を必ず分けて確認するのがおすすめです。

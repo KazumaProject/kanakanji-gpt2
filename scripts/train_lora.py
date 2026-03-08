@@ -57,6 +57,16 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Expect TSV format: left_context<TAB>yomi<TAB>expected",
     )
+    parser.add_argument(
+        "--resume_from_checkpoint",
+        type=str,
+        default=None,
+        help=(
+            "Resume training from checkpoint. "
+            "Use 'true' to resume from the latest checkpoint in output_dir, "
+            "or pass a checkpoint path such as out/zenz-lora/checkpoint-200."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -96,7 +106,8 @@ def build_hf_dataset(rows: list[dict[str, str]]) -> Dataset:
 def load_tokenizer(base_model: str) -> PreTrainedTokenizerBase:
     tokenizer = AutoTokenizer.from_pretrained(base_model, use_fast=False)
     added = tokenizer.add_special_tokens(
-        {"additional_special_tokens": SPECIAL_TOKENS})
+        {"additional_special_tokens": SPECIAL_TOKENS}
+    )
     print(f"Added {added} special tokens")
 
     if tokenizer.pad_token is None:
@@ -206,6 +217,31 @@ def build_model(
     return model
 
 
+def resolve_resume_from_checkpoint(
+    resume_arg: str | None,
+    output_dir: Path,
+) -> str | bool | None:
+    if not resume_arg:
+        return None
+
+    normalized = resume_arg.strip()
+    if normalized.lower() == "true":
+        return True
+
+    checkpoint_path = Path(normalized)
+    if not checkpoint_path.exists():
+        raise FileNotFoundError(
+            f"Checkpoint path does not exist: {checkpoint_path}"
+        )
+
+    if not checkpoint_path.is_dir():
+        raise ValueError(
+            f"Checkpoint path must be a directory: {checkpoint_path}"
+        )
+
+    return str(checkpoint_path)
+
+
 def main() -> None:
     args = parse_args()
     set_seed(args.seed)
@@ -249,9 +285,14 @@ def main() -> None:
     fp16 = device == "cuda" and dtype == torch.float16
     bf16 = device == "cuda" and dtype == torch.bfloat16
 
+    resume_from_checkpoint = resolve_resume_from_checkpoint(
+        args.resume_from_checkpoint,
+        args.output_dir,
+    )
+
     training_args = TrainingArguments(
         output_dir=str(args.output_dir),
-        overwrite_output_dir=True,
+        overwrite_output_dir=False,
         num_train_epochs=args.num_train_epochs,
         learning_rate=args.learning_rate,
         weight_decay=args.weight_decay,
@@ -286,7 +327,15 @@ def main() -> None:
         tokenizer=tokenizer,
     )
 
-    trainer.train()
+    if resume_from_checkpoint is None:
+        print("Starting new training run")
+    elif resume_from_checkpoint is True:
+        print(
+            f"Resuming training from latest checkpoint in: {args.output_dir}")
+    else:
+        print(f"Resuming training from checkpoint: {resume_from_checkpoint}")
+
+    trainer.train(resume_from_checkpoint=resume_from_checkpoint)
     metrics = trainer.evaluate()
 
     eval_loss = metrics.get("eval_loss")
