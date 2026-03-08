@@ -11,6 +11,8 @@ dependencies = [
   "accelerate==0.27.2",
   "sentencepiece>=0.2.0",
   "tqdm>=4.66.0",
+  "sudachipy>=0.6.10",
+  "sudachidict-core>=20260116",
 ]
 
 [tool.uv]

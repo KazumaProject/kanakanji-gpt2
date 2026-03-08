@@ -1,4 +1,6 @@
 .venv
+uv.lock
 out
 kanakanji_gpt2.egg-info
 __pycache__
+data/zenz_*.tsv

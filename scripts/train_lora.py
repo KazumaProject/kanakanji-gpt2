@@ -83,49 +83,10 @@ def pick_torch_dtype(device: str) -> torch.dtype:
     return torch.float32
 
 
-def read_tsv(path: Path, with_context: bool) -> list[dict[str, str]]:
-    rows: list[dict[str, str]] = []
+def read_rows(path: Path, with_context: bool) -> list[dict[str, str]]:
+    from scripts.dataset_pipeline import read_prepared_records_from_path
 
-    with path.open("r", encoding="utf-8") as f:
-        for line_no, raw_line in enumerate(f, start=1):
-            line = raw_line.rstrip("\n")
-            if not line.strip():
-                continue
-
-            fields = line.split("\t")
-
-            if with_context:
-                if len(fields) < 3:
-                    raise ValueError(
-                        f"Invalid line at {path}:{line_no}: expected 3+ columns, got {len(fields)}"
-                    )
-                left_context = fields[0].strip()
-                yomi = fields[1].strip()
-                expected = fields[2].strip()
-                prompt = f"{CONTEXT_START}{left_context}{INPUT_START}{yomi}{OUTPUT_START}"
-            else:
-                if len(fields) < 2:
-                    raise ValueError(
-                        f"Invalid line at {path}:{line_no}: expected 2+ columns, got {len(fields)}"
-                    )
-                left_context = ""
-                yomi = fields[0].strip()
-                expected = fields[1].strip()
-                prompt = f"{INPUT_START}{yomi}{OUTPUT_START}"
-
-            if not yomi or not expected:
-                continue
-
-            rows.append(
-                {
-                    "left_context": left_context,
-                    "yomi": yomi,
-                    "expected": expected,
-                    "prompt": prompt,
-                }
-            )
-
-    return rows
+    return read_prepared_records_from_path(path=path, with_context=with_context)
 
 
 def build_hf_dataset(rows: list[dict[str, str]]) -> Dataset:
@@ -249,8 +210,8 @@ def main() -> None:
     args = parse_args()
     set_seed(args.seed)
 
-    train_rows = read_tsv(args.train_tsv, args.with_context)
-    valid_rows = read_tsv(args.valid_tsv, args.with_context)
+    train_rows = read_rows(args.train_tsv, args.with_context)
+    valid_rows = read_rows(args.valid_tsv, args.with_context)
 
     if not train_rows:
         raise ValueError("Train TSV is empty")
