@@ -1,0 +1,17 @@
+[project]
+name = "kanakanji-gpt2"
+version = "0.1.0"
+description = "Minimal kana-kanji conversion fine-tuning pipeline with GPT-2 Japanese char model"
+readme = "README.md"
+requires-python = ">=3.10,<3.11"
+dependencies = [
+  "transformers==4.37.2",
+  "datasets==2.18.0",
+  "peft==0.7.1",
+  "accelerate==0.27.2",
+  "sentencepiece>=0.2.0",
+  "tqdm>=4.66.0",
+]
+
+[tool.uv]
+dev-dependencies = []
